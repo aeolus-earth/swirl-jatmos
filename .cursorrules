@@ -1,0 +1,168 @@
+# Swirl-Jatmos Cursor Rules
+
+## Project Overview
+This is Swirl-Jatmos, a JAX-based tool for 3D atmospheric large-eddy simulations on TPUs/GPUs. It solves anelastic Navier-Stokes equations with physics modules for thermodynamics, microphysics, and radiative transfer.
+
+## General Principles
+- This is a Google Research project (not officially supported)
+- Focus on performance, numerical accuracy, and scientific correctness
+- Code must run efficiently on distributed accelerators (TPUs/GPUs)
+- Maintain compatibility with JAX's automatic parallelization
+
+## Language & Version
+- Python 3.11+
+- Use type hints consistently
+- Follow PEP 8 style guidelines
+
+## Key Dependencies
+- **JAX**: Core computational framework with CUDA support
+- **NumPy**: Numerical operations
+- **NetCDF4**: File I/O for atmospheric data
+- **Orbax**: Distributed checkpointing
+- **scipy**: Scientific computing utilities
+- **absl-py**: Command-line flags and app utilities
+
+## JAX-Specific Guidelines
+
+### Functional Programming
+- Write pure functions without side effects
+- Avoid in-place mutations; JAX arrays are immutable
+- Use JAX transformations: `jax.jit`, `jax.grad`, `jax.vmap`, `jax.pmap`
+- Be mindful of Python control flow vs JAX control flow (`jax.lax.cond`, `jax.lax.fori_loop`)
+
+### Performance
+- Use `@jax.jit` for performance-critical functions
+- Minimize host-device communication
+- Use `jax.numpy` instead of `numpy` for operations on JAX arrays
+- Be aware of XLA compilation and tracing semantics
+- Prefer vectorized operations over loops
+- Use static arguments in JIT when appropriate
+
+### Distributed Computing
+- Code should work with JAX's automatic parallelization
+- Be mindful of sharding and data distribution
+- Ensure operations are compatible with `pmap` and `shmap`
+- Consider memory constraints on accelerators
+
+## Code Organization
+
+### Module Structure
+- Keep physics modules separated: convection, diffusion, microphysics, radiation
+- Use clear boundaries between components (boundary conditions, solvers, etc.)
+- Config objects should use dataclasses with `dataclasses-json`
+
+### Naming Conventions
+- Use descriptive variable names for physical quantities
+- Common atmospheric variables: `u`, `v`, `w` (velocities), `theta_li` (potential temperature), `q_t` (humidity)
+- Grid dimensions typically: `(nx, ny, nz)` or `(x, y, z)`
+- Use standard meteorological conventions where applicable
+
+### Testing
+- Tests follow the pattern: `*_test.py` files alongside implementation
+- Use appropriate numerical tolerances for floating-point comparisons
+- Test both correctness and shapes of outputs
+- Include unit tests for numerical methods
+
+## Numerical Methods
+
+### Grid Structure
+- Staggered Arakawa C-grid
+- Non-uniform grids allowed
+- Conservative finite-volume formulation
+- Handle grid stretching carefully
+
+### Discretization
+- WENO5 for convection schemes
+- RK3 timestepper (3-stage Runge-Kutta)
+- Adaptive timestepping with CFL conditions
+- Finite-volume methods for conservation
+
+### Solvers
+- Poisson solver for pressure using fast diagonalization (tensor-product decomposition)
+- Jacobi solver available as alternative
+- Ensure solver convergence and accuracy
+
+## Physics Modules
+
+### Thermodynamics
+- Equilibrium thermodynamics for water phases
+- Handle phase transitions correctly
+- Linearized liquid-ice potential temperature formulation
+
+### Microphysics
+- One-moment microphysics scheme
+- Particle types: rain and snow
+- Terminal velocity parameterizations (Chen 2022)
+
+### Radiation
+- RRTMGP radiative transfer
+- Handle longwave and shortwave separately
+- Cloud optics and gas optics lookup tables
+
+## File I/O
+- Use NetCDF4 for atmospheric data
+- Orbax for checkpointing
+- Store sufficient metadata for reproducibility
+
+## Performance Considerations
+- All simulations run in FP32 precision
+- Benchmark: ~120ms per timestep on TPUv6e (256³ grid points)
+- Each timestep = 3 RK3 stages
+- Optimize for both single-core and distributed settings
+
+## Documentation
+- Use clear docstrings for all public functions
+- Include shape annotations in docstrings (e.g., `(nx, ny, nz)`)
+- Document physical units where applicable
+- Explain numerical methods and discretizations
+- Reference papers/algorithms when implementing published methods
+
+## Code Style
+- Use meaningful variable names, even for short-lived variables
+- Keep functions focused and modular
+- Avoid deep nesting; extract helper functions
+- Use constants from `constants.py` for physical parameters
+- Group imports: stdlib, third-party, local modules
+
+## Error Handling
+- Validate inputs shapes and types
+- Check for NaNs/Infs in numerical results
+- Provide clear error messages for configuration issues
+- Use assertions for invariants and preconditions
+
+## Boundary Conditions
+- Periodic in horizontal directions
+- No-slip or free-slip in vertical direction
+- Implement consistently across all variables
+- Handle sponge layers appropriately
+
+## When Adding New Features
+- Consider impact on distributed performance
+- Maintain compatibility with existing simulation setups
+- Add appropriate tests
+- Update config objects if needed
+- Document physical basis and numerical implementation
+- Ensure JAX transformations (jit, grad, vmap) work correctly
+
+## Common Pitfalls to Avoid
+- Don't use Python lists for numerical arrays; use JAX arrays
+- Don't mutate arrays; create new ones
+- Avoid Python loops over array elements; vectorize
+- Don't mix numpy and jax.numpy arrays unnecessarily
+- Be careful with indexing on staggered grids
+- Watch for off-by-one errors in grid operations
+- Avoid dynamic shapes within JIT-compiled functions
+- Don't use non-JAX random number generation in JIT'd code
+
+## Debugging
+- Use `jax.debug.print()` for debugging JIT'd functions
+- Check array shapes frequently
+- Verify conservation properties (mass, energy)
+- Use smaller grid sizes for debugging
+- Test on CPU before TPU/GPU when developing
+
+## Demos and Examples
+- Jupyter notebooks in `swirl_jatmos/demos/`
+- Supercell and RCEMIP demos available
+- Use demos to verify end-to-end functionality
+
