@@ -1,0 +1,346 @@
+╔══════════════════════════════════════════════════════════════════════════════╗
+║                 MESOSCALE TO LES BOUNDARY CONDITION APPROACH                 ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+
+1. DOMAIN CONFIGURATION
+═══════════════════════════════════════════════════════════════════════════════
+
+    WRF Mesoscale Domain (3 km resolution)
+    ┌─────────────────────────────────────────────────────────────┐
+    │                                                               │
+    │         ┌───────────────────────────────┐                   │
+    │         │  Swirl-Jatmos LES Domain      │                   │
+    │         │  (50m resolution)              │                   │
+    │         │                                │                   │
+    │    ◄────┤  West BC                       │                   │
+    │         │  (Relaxation Zone)             │                   │
+    │         │                                │                   │
+    │         │         ┌────────────┐         │                   │
+    │         │         │ Interior   │         │                   │
+    │         │  North  │ (LES       │  South  │                   │
+    │         │   BC    │ physics)   │   BC    │                   │
+    │         │         │            │         │                   │
+    │         │         └────────────┘         │────►              │
+    │         │                         East BC │                   │
+    │         │                  (Relaxation)   │                   │
+    │         └───────────────────────────────┘                   │
+    │                                                               │
+    └─────────────────────────────────────────────────────────────┘
+
+    WRF provides boundary forcing at 4 lateral boundaries
+    LES develops turbulence in interior region
+
+
+2. RELAXATION ZONE CONCEPT
+═══════════════════════════════════════════════════════════════════════════════
+
+    West Boundary (looking from above):
+
+    ├────────────────────────────────────────────────────────────────┤
+    │←──────── Relaxation Zone ────────→│←──── Interior ────────────→│
+    │ (10-20 grid points, ~500-2000m)   │ (LES physics unconstrained)│
+    ├────────────────────────────────────────────────────────────────┤
+    
+    Weight Function:
+    
+    1.0 ┤●                                                         
+        │ ●●                                                       
+        │   ●●                                                     
+        │     ●●●                          Interior: Pure LES     
+    w   │        ●●●                       (no forcing)            
+    e   │           ●●●                                            
+    i   │              ●●●●                                        
+    g   │                  ●●●●                                    
+    h   │                      ●●●●                                
+    t   │                          ●●●●●                           
+        │                               ●●●●●●                     
+    0.0 ┤                                     ●●●●●●●●●●●●●●●●●   
+        └────────────────────────────────────────────────────────►
+        BC                                                  Edge of zone
+        (x=0)                                               (x = width)
+    
+    Equation: dφ/dt = -w(x)/τ × (φ_LES - φ_WRF)
+    
+    Where:
+    - w(x) = weight function (shown above)
+    - τ = relaxation timescale (e.g., 300 seconds)
+    - φ = any prognostic variable (u, v, w, θ, q, etc.)
+
+
+3. VERTICAL CROSS-SECTION
+═══════════════════════════════════════════════════════════════════════════════
+
+    z
+    ▲
+    │  3 km  ┌─────────────────────────────────────────────────────┐
+    │        │         Free-slip or sponge layer (top BC)           │
+    │        ├─────────────────────────────────────────────────────┤
+    │        │                                                       │
+    │        │        ∿∿∿  ∿∿∿     ∿∿∿                              │
+    │  2 km  │      ∿∿      ∿∿  ∿∿    ∿∿  ← LES-resolved eddies   │
+    │        │     ∿  R  E  L  A  X  A  T  I  O  N                  │
+    │        │    │                                                  │
+    │  1 km  │    │  ∿∿∿  ∿∿∿     ∿∿∿                              │
+    │        │    │∿∿      ∿∿  ∿∿    ∿∿                            │
+    │        │    │                                                  │
+    │        │    │  ← Blend WRF + LES                              │
+    │   0 km ├────┴──────────────────────────────────────────────────┤
+    │        │      Monin-Obukhov surface layer (bottom BC)         │
+    │        └─────────────────────────────────────────────────────┘
+    │
+    └────────────────────────────────────────────────────────────────► x
+            West BC                                          East BC
+            (WRF)                                            (WRF)
+
+
+4. DATA FLOW
+═══════════════════════════════════════════════════════════════════════════════
+
+    ┌─────────────────┐
+    │  WRF Output     │
+    │  wrfout_d03_*   │
+    └────────┬────────┘
+             │
+             ▼
+    ┌─────────────────────────┐
+    │ Read netCDF             │
+    │ - Extract boundary      │
+    │ - Extract time slice    │
+    └────────┬────────────────┘
+             │
+             ▼
+    ┌─────────────────────────┐
+    │ Vertical Interpolation  │
+    │ WRF η → LES z           │
+    │ (terrain-following →    │
+    │  Cartesian)             │
+    └────────┬────────────────┘
+             │
+             ▼
+    ┌─────────────────────────┐
+    │ Horizontal Interp       │
+    │ 3km WRF → 50m LES       │
+    │ (2D interpolation on    │
+    │  boundary planes)       │
+    └────────┬────────────────┘
+             │
+             ▼
+    ┌─────────────────────────┐
+    │ Variable Transform      │
+    │ - T → θ_li              │
+    │ - QVAPOR → q_t          │
+    │ - Rotate winds          │
+    └────────┬────────────────┘
+             │
+             ▼
+    ┌─────────────────────────┐
+    │ Temporal Interpolation  │
+    │ (Linear between WRF     │
+    │  output times)          │
+    └────────┬────────────────┘
+             │
+             ▼
+    ┌─────────────────────────┐
+    │ Apply Relaxation Zone   │
+    │ φ^(n+1) = φ^n -         │
+    │   dt/τ × w(x) ×         │
+    │   (φ^n - φ_WRF)         │
+    └────────┬────────────────┘
+             │
+             ▼
+    ┌─────────────────────────┐
+    │  Updated LES State      │
+    └─────────────────────────┘
+
+
+5. TIME STEPPING INTEGRATION
+═══════════════════════════════════════════════════════════════════════════════
+
+    Each LES timestep (dt = 1-2 seconds):
+    
+    ┌─────────────────────────────────────────────────────────────┐
+    │ 1. Read WRF boundary data (if update time)                  │
+    │    - Check if new WRF output time reached                   │
+    │    - Load next time slice if needed                         │
+    │    - Cache two WRF times for interpolation                  │
+    └──────────────────────────┬──────────────────────────────────┘
+                               │
+                               ▼
+    ┌─────────────────────────────────────────────────────────────┐
+    │ 2. RK3 Stage 1                                              │
+    │    - Compute tendencies (convection, diffusion, etc.)       │
+    │    - Update state                                            │
+    │    - Solve Poisson equation for pressure                    │
+    └──────────────────────────┬──────────────────────────────────┘
+                               │
+                               ▼
+    ┌─────────────────────────────────────────────────────────────┐
+    │ 3. Apply lateral BCs after RK3 Stage 1                     │
+    │    - For each boundary (west, east, south, north):          │
+    │      * Get WRF values (with temporal interpolation)         │
+    │      * Apply relaxation zone                                │
+    └──────────────────────────┬──────────────────────────────────┘
+                               │
+                               ▼
+    ┌─────────────────────────────────────────────────────────────┐
+    │ 4. RK3 Stage 2                                              │
+    │    - Compute tendencies                                      │
+    │    - Update state                                            │
+    └──────────────────────────┬──────────────────────────────────┘
+                               │
+                               ▼
+    ┌─────────────────────────────────────────────────────────────┐
+    │ 5. Apply lateral BCs after RK3 Stage 2                     │
+    └──────────────────────────┬──────────────────────────────────┘
+                               │
+                               ▼
+    ┌─────────────────────────────────────────────────────────────┐
+    │ 6. RK3 Stage 3                                              │
+    │    - Compute tendencies                                      │
+    │    - Update state                                            │
+    │    - Solve Poisson equation                                  │
+    └──────────────────────────┬──────────────────────────────────┘
+                               │
+                               ▼
+    ┌─────────────────────────────────────────────────────────────┐
+    │ 7. Apply lateral BCs after RK3 Stage 3                     │
+    └──────────────────────────┬──────────────────────────────────┘
+                               │
+                               ▼
+    ┌─────────────────────────────────────────────────────────────┐
+    │ 8. Output / diagnostics                                     │
+    └─────────────────────────────────────────────────────────────┘
+
+
+6. VARIABLE STAGGERING
+═══════════════════════════════════════════════════════════════════════════════
+
+    Arakawa C-grid (side view):
+    
+    z  │  ┌───w───┐  ┌───w───┐
+       │  │       │  │       │
+       │  θ   u   θ  │       │    u: x-faces (i+1/2, j, k)
+       │  q       q  u       u    v: y-faces (i, j+1/2, k)
+       │  │       │  │       │    w: z-faces (i, j, k+1/2)
+       ├──┴───w───┴──┴───────┘    θ, q: cell centers (i, j, k)
+       │  │       │  
+       │  θ   u   θ
+       │  q       q
+       │  │       │
+       └──┴───w───┴───────────► x
+    
+    When applying BCs:
+    - u at west boundary: directly at boundary face
+    - v, w, θ, q: need to handle offset from boundary
+    
+
+7. RELAXATION TIMESCALE TUNING
+═══════════════════════════════════════════════════════════════════════════════
+
+    Recommended values:
+    
+    Variable         τ (seconds)    Notes
+    ────────────────────────────────────────────────────────────────
+    u, v (mean)        300          5 min - constrain large-scale flow
+    u, v (turb)        600          10 min - allow LES eddies
+    w                  900          15 min - weakly constrain vertical
+    θ_li               300          5 min - maintain thermal structure
+    q_t                300          5 min - maintain moisture
+    q_r, q_s           900          15 min - weakly constrain precip
+    
+    Trade-offs:
+    - Shorter τ → stronger forcing, less LES freedom
+    - Longer τ → weaker forcing, potential drift from WRF
+    
+    Typical choice: τ = 300 s (5 minutes) for all variables
+
+
+8. COORDINATE TRANSFORMATION EXAMPLE
+═══════════════════════════════════════════════════════════════════════════════
+
+    WRF terrain-following coordinate (η):
+    
+    η = (p_h - p_top) / (p_sfc - p_top)
+    
+    where:
+    - p_h = hydrostatic pressure
+    - p_top = domain top pressure
+    - p_sfc = surface pressure
+    
+    Convert to height (z):
+    
+    1. Compute geopotential: Φ = (PH + PHB) / g
+    2. Height above sea level: z = Φ / 9.81
+    3. Interpolate WRF(η) → LES(z) using scipy.interpolate
+    
+    Example:
+    
+    WRF levels (η):     LES levels (z):
+    1.00 ─────────     3000 m ─────────  ← Interpolate WRF to these
+    0.95 ─────────     2500 m ─────────     fixed heights
+    0.85 ─────────     2000 m ─────────
+    0.70 ─────────     1500 m ─────────
+    0.50 ─────────     1000 m ─────────
+    0.30 ─────────      500 m ─────────
+    0.10 ─────────      100 m ─────────
+    0.00 ─────────        0 m ─────────
+
+
+9. IMPLEMENTATION MODULES
+═══════════════════════════════════════════════════════════════════════════════
+
+    boundary_conditions/
+    ├── boundary_conditions.py    (Existing - vertical BCs)
+    │   └── ZBoundaryConditions
+    │
+    ├── lateral_bcs.py           (NEW - lateral BC framework)
+    │   ├── LateralBC
+    │   ├── apply_relaxation_zone()
+    │   └── update_lateral_boundaries()
+    │
+    └── mesoscale_forcing.py     (NEW - WRF interface)
+        ├── BoundaryData
+        ├── MesoscaleForcingReader
+        ├── read_wrf_boundary()
+        ├── interpolate_vertical()
+        ├── interpolate_horizontal()
+        └── transform_variables()
+
+
+10. VALIDATION APPROACH
+═══════════════════════════════════════════════════════════════════════════════
+
+    Test 1: Uniform Flow
+    ┌────────────────────────┐
+    │ WRF: u = 10 m/s        │ → LES should maintain u = 10 m/s
+    │      everywhere        │   (no spurious forcing)
+    └────────────────────────┘
+    
+    Test 2: Mass Conservation
+    ┌────────────────────────┐
+    │ ∫∫∫ ρ dV = constant    │ → Check at every timestep
+    │                        │   (within machine precision)
+    └────────────────────────┘
+    
+    Test 3: Wave Reflection
+    ┌────────────────────────┐
+    │ Introduce wave at      │ → Wave should exit domain
+    │ domain center          │   cleanly (no reflection)
+    └────────────────────────┘
+    
+    Test 4: Turbulence Development
+    ┌────────────────────────┐
+    │ Initialize with WRF    │ → Interior should develop
+    │ smooth profile         │   LES-scale turbulence
+    └────────────────────────┘   while boundaries stay smooth
+
+
+═══════════════════════════════════════════════════════════════════════════════
+END OF DIAGRAM
+═══════════════════════════════════════════════════════════════════════════════
+
+For detailed implementation, see:
+- MESOSCALE_BC_INTEGRATION_GUIDE.md  (comprehensive guide)
+- lateral_bc_poc.py                  (working code)
+- wrf_nested_les_example.py         (usage example)
+
