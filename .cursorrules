@@ -1,0 +1,213 @@
+# Swirl-Jatmos: JAX Atmospheric Large-Eddy Simulation (LES)
+
+## Project Overview
+Swirl-Jatmos is a high-performance 3D atmospheric large-eddy simulation tool built with JAX, designed to run on TPUs and GPUs. It solves the anelastic Navier-Stokes equations with comprehensive physics modules for atmospheric modeling.
+
+## Core Architecture
+
+### Numerical Framework
+- **Grid**: Staggered Arakawa C-grid with optional non-uniform stretched grids
+- **Time Integration**: 3-stage Runge-Kutta (RK3) timestepper with adaptive CFL-based timestep control
+- **Spatial Discretization**: Conservative finite-volume formulation with WENO5 convection schemes
+- **Pressure Solver**: Poisson equation solved via fast diagonalization or Jacobi iterative methods
+- **Precision**: FP32 by default, FP64 optional via `USE_64BIT_DTYPES` flag
+- **Parallelization**: JAX's automatic parallelization (no explicit MPI directives)
+
+### Prognostic Variables
+The model evolves the following state variables:
+1. **Velocities**: `u`, `v`, `w` (on staggered grid: fcc, cfc, ccf)
+2. **Thermodynamics**: `theta_li` (linearized liquid-ice potential temperature)
+3. **Moisture**: `q_t` (total specific humidity)
+4. **Precipitation**: `q_r` (rain), `q_s` (snow)
+5. **Pressure**: `p` (hydrodynamic pressure, diagnosed via Poisson equation)
+
+### Physics Modules
+
+#### 1. Thermodynamics (`swirl_jatmos/thermodynamics/water.py`)
+- **Equilibrium water thermodynamics** with phase transitions
+- Computes temperature, density, and phase partitioning (liquid/ice/vapor)
+- Uses **iterative Newton solver** for equilibrium state
+- Key functions: `compute_thermodynamic_fields_from_prognostic_fields()`
+- **Potential differentiability concern**: Newton solver iterations with convergence checks
+
+#### 2. Microphysics (`swirl_jatmos/microphysics/`)
+- **One-moment microphysics scheme**
+- Processes:
+  - Autoconversion (cloud → rain, cloud ice → snow)
+  - Accretion (rain/snow collecting cloud droplets)
+  - Evaporation/sublimation of precipitation
+  - Sedimentation with terminal velocity
+- **Terminal velocity**: Chen et al. 2022 parameterization
+- **Potential differentiability concern**: Clipping operations (`jnp.clip`) and conditional logic
+
+#### 3. Radiation (`swirl_jatmos/rrtmgp/`)
+- **RRTMGP radiative transfer** (Pincus et al.)
+- Computes longwave and shortwave radiative fluxes
+- Includes gas optics and cloud optics
+- Uses lookup tables for optical properties
+- **Potential differentiability concern**: Lookup table interpolations and spectral band integration
+
+#### 4. Subgrid-Scale Turbulence (`swirl_jatmos/sgs.py`)
+- **Smagorinsky-Lilly SGS model**
+- Computes eddy viscosity from strain rate tensor and grid spacing
+- Applied to momentum and scalar diffusion
+
+#### 5. Boundary Conditions (`swirl_jatmos/boundary_conditions/`)
+- Periodic in horizontal (x, y)
+- Free-slip or no-slip in vertical (z)
+- **Monin-Obukhov similarity theory** for surface layer
+- Dirichlet BCs: w=0 at top/bottom
+- Neumann BCs: no diffusive flux for scalars
+
+### Key Source Files
+
+#### Core Solver
+- `driver.py`: Main simulation loop with checkpointing (Orbax)
+- `navier_stokes_step.py`: RK3 timestepper implementation
+- `velocity.py`: Momentum equation RHS (advection, diffusion, buoyancy)
+- `scalars.py`: Scalar transport equations (theta_li, q_t, q_r, q_s)
+
+#### Numerics
+- `derivatives.py`: Finite-difference operators for staggered grid
+- `convection.py`: Advection schemes (WENO5, upwind, etc.)
+- `diffusion.py`: Diffusion operator with eddy viscosity
+- `interpolation.py`: Grid interpolation utilities
+- `linalg/`: Poisson solvers (fast diagonalization, Jacobi)
+
+#### Grid & Geometry
+- `stretched_grid_init.py`: Non-uniform grid initialization
+- `stretched_grid_util.py`: Grid spacing and metric utilities
+- `common_ops.py`: Grid-aware operations
+
+#### Configuration
+- `config.py`: Main configuration dataclass (`Config`, `ConfigExternal`)
+- `jatmos_types.py`: Type aliases and dtype settings
+- `constants.py`: Physical constants
+
+#### Utilities
+- `sim_initializer.py`: Initialize state variables and grids
+- `timestep_control.py`: Adaptive timestep based on CFL condition
+- `utils/file_io.py`: I/O operations
+- `utils/check_states_valid.py`: NaN/Inf detection
+- `utils/obs_op_utils.py`: Observation operator utilities (for data assimilation)
+
+### Simulation Setups (`swirl_jatmos/sim_setups/`)
+Pre-configured test cases:
+- `supercell.py`: Supercell thunderstorm simulation
+- `walker_circulation.py`: Radiative-convective equilibrium
+- `buoyant_bubble.py`: Rising thermal bubble test
+- `taylor_green_vortex_2d.py`: 2D TGV test case
+- `navier_stokes_simple.py`: Simple flow test
+
+### Data Assimilation Compatibility
+- Uses JAX arrays throughout (differentiable by default)
+- State dictionary format (`dict[str, Array]`) compatible with DA workflows
+- Observation operator utilities in `utils/obs_op_utils.py`
+- Checkpointing via Orbax for state persistence
+
+## Code Style & Conventions
+
+### Naming Conventions
+- **Grid locations**: 
+  - `_ccc`: cell center in all dimensions
+  - `_fcc`: face in x, center in y, z
+  - `_cfc`: center in x, face in y, center in z
+  - `_ccf`: center in x, y, face in z
+  - `_xxc`: any x/y location, center in z
+  - `_xxf`: any x/y location, face in z
+- **Arrays**: Type alias `Array = jax.Array`
+- **Functions**: Lowercase with underscores (e.g., `compute_strain_rate_tensor`)
+- **Classes**: CamelCase (e.g., `WaterParams`, `Config`)
+- **Constants**: UPPER_CASE (e.g., `RHO_WATER`, `CP_D`)
+
+### Type Annotations
+- Use `TypeAlias` from typing
+- Common aliases: `Array`, `StatesMap = dict[str, Array]`
+
+### Functional Programming
+- **Pure functions**: Most functions are pure (no side effects)
+- **Immutable state updates**: Use `dict(states)` to copy, then update
+- **JIT compilation**: Main loops are JIT-compiled with `jax.jit`
+
+### Physics Parameters
+- Dataclasses with `frozen=True` for immutability
+- Examples: `WaterParams`, `MicrophysicsConfig`, `ConvectionConfig`
+
+## Development Guidelines
+
+### Adding New Physics Modules
+1. Create module in appropriate subdirectory
+2. Define config dataclass in corresponding `*_config.py`
+3. Integrate into `navier_stokes_step.py` or `scalars.py`
+4. Add aux_output fields to `Config.aux_output_fields` if needed
+5. Write unit tests in `*_test.py`
+
+### Differentiability Requirements
+For data assimilation and adjoint applications:
+- **Avoid**: `np.array` (use `jnp.array`), `numpy` random, explicit loops with break/continue
+- **Use cautiously**: `jax.lax.cond`, `jax.lax.while_loop`, `jnp.clip` (differentiable but can cause gradient issues)
+- **Iterative solvers**: Ensure fixed iteration count or use `jax.lax.while_loop` correctly
+- **Lookup tables**: Use `jnp.interp` or differentiable interpolation
+
+### Testing
+- Unit tests use `unittest.TestCase` or `parameterized.TestCase`
+- Test files: `*_test.py`
+- Run with: `python -m pytest` or module-specific test runner
+
+### Performance Optimization
+- Profile with JAX profiler: `jax.profiler.trace()`
+- Use `jax.block_until_ready()` for accurate timing
+- Benchmark on target hardware (TPU/GPU)
+
+## Dependencies
+```toml
+dependencies = [
+    "absl-py",          # Flags and logging
+    "dataclasses-json", # JSON serialization
+    "etils",            # Path utilities
+    "jax[cuda]",        # Core JAX with GPU support
+    "netCDF4",          # NetCDF I/O
+    "numpy",            # NumPy arrays
+    "orbax",            # Checkpointing
+    "scipy",            # Special functions
+]
+```
+
+## Installation & Usage
+```bash
+# Clone and install
+git clone https://github.com/google-research/swirl-jatmos.git
+python3 -m pip install -e swirl-jatmos
+
+# Run demos (see Jupyter notebooks)
+# - swirl_jatmos/demos/supercell_demo.ipynb
+# - swirl_jatmos/demos/rcemip_demo.ipynb
+```
+
+## Performance Benchmarks
+On TPUv6e (Trillium) with 256³ grid points per core:
+- 1 core: 120 ms/timestep
+- 8 cores: 178 ms/timestep
+- 64 cores: 570 ms/timestep
+
+## Known Issues & Limitations
+1. **Halo width**: Only `halo_width=1` supported for parallel simulations
+2. **x64 precision**: JAX must have x64 enabled for time variables (`t_ns`, `dt_ns`)
+3. **Boundary conditions**: Neumann BCs in z use halo nodes (set to `HALO_VALUE=-4e7` to catch bugs)
+4. **Differentiability**: Not all modules tested for gradient computation (see differentiability audit)
+
+## Data Assimilation Integration Notes
+- **State vector**: Convert `states` dict to flat array for DA algorithms
+- **Observation operators**: Implement in `utils/obs_op_utils.py`
+- **Forward model**: Use `navier_stokes_step.step()` or `driver.generate_one_cycle_fn()`
+- **Gradient computation**: Test with `jax.grad()` or `jax.vjp()` for adjoint sensitivity
+- **Checkpointing**: Leverage Orbax for ensemble states
+
+## References
+- Repository: https://github.com/google-research/swirl-jatmos
+- License: Apache 2.0
+- Authors: parkerjeff@google.com (Google Research)
+
+## Contact & Contributing
+See `CONTRIBUTING.md` for guidelines on submitting issues and pull requests.
+

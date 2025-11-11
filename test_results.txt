@@ -1,0 +1,107 @@
+
+======================================================================
+SWIRL-JATMOS DIFFERENTIABILITY TEST SUITE
+======================================================================
+
+This script tests whether JAX can compute gradients through
+various physics modules in Swirl-Jatmos. This is essential for
+data assimilation applications requiring adjoint sensitivity.
+
+
+======================================================================
+Testing Thermodynamics Module
+======================================================================
+
+✓ PASS: Thermodynamics - saturation_vapor_pressure
+  temperature: norm=2.12e+02, finite=True
+✓ PASS: Thermodynamics - lh_v (latent heat vaporization)
+  T: norm=4.05e+03, finite=True
+✓ PASS: Thermodynamics - lh_s (latent heat sublimation)
+  T: norm=4.40e+02, finite=True
+✓ PASS: Thermodynamics - liquid_fraction (phase partitioning)
+  T: norm=3.52e-02, finite=True
+✗ FAIL: Thermodynamics - compute_thermodynamic_fields (full equilibrium solver)
+  Error: vmap was requested to map its argument along axis 0, which implies that its rank should be at least 1, but is only 0 (its shape is ())
+
+======================================================================
+Testing Microphysics Module
+======================================================================
+
+✓ PASS: Microphysics - autoconversion_rain
+  q_liq: norm=8.00e-03, finite=True
+✓ PASS: Microphysics - autoconversion_snow_nosupersat
+  q_ice: norm=8.00e-02, finite=True
+✗ FAIL: Microphysics - evaporation
+  Error: module 'swirl_jatmos.microphysics.microphysics_one_moment' has no attribute 'evaporation'
+✗ FAIL: Microphysics - sublimation
+  Error: module 'swirl_jatmos.microphysics.microphysics_one_moment' has no attribute 'sublimation'
+
+======================================================================
+Testing Convection/Advection Module
+======================================================================
+
+✓ PASS: Convection - basic_advection_flux
+  u: norm=1.28e+01, finite=True
+
+======================================================================
+Testing Diffusion Module
+======================================================================
+
+✓ PASS: Diffusion - laplacian_diffusion
+  field: norm=7.32e-03, finite=True
+
+======================================================================
+Testing Derivative Operators
+======================================================================
+
+Error in derivatives tests: Derivatives.__init__() got an unexpected keyword argument 'halo_width'
+
+======================================================================
+Testing Subgrid-Scale Turbulence Model
+======================================================================
+
+✓ PASS: SGS Model - smagorinsky_eddy_viscosity
+  s11: norm=9.05e+03, finite=True
+
+======================================================================
+Testing Boundary Conditions
+======================================================================
+
+✓ PASS: Boundary Conditions - periodic_bc
+  field: norm=4.53e+01, finite=True
+✓ PASS: Boundary Conditions - dirichlet_bc
+  field: norm=3.92e+01, finite=True
+
+======================================================================
+Testing Poisson Solver
+======================================================================
+
+✓ PASS: Poisson Solver - simplified_helmholtz (differentiability structure)
+  rhs: norm=2.47e+01, finite=True
+
+======================================================================
+Testing Full Navier-Stokes Step
+======================================================================
+
+Skipping full step test (use --test_full_step to enable)
+
+======================================================================
+DIFFERENTIABILITY TEST SUMMARY
+======================================================================
+
+Total tests: 15
+Passed: 12 (80.0%)
+Failed: 3 (20.0%)
+
+Warnings: 1
+  ⚠ Poisson Solver - Full iterative solver: Full Poisson solver not tested - may need implicit differentiation
+
+Failed tests:
+  ✗ Thermodynamics - compute_thermodynamic_fields (full equilibrium solver)
+    vmap was requested to map its argument along axis 0, which implies that its rank should be at least 
+  ✗ Microphysics - evaporation
+    module 'swirl_jatmos.microphysics.microphysics_one_moment' has no attribute 'evaporation'
+  ✗ Microphysics - sublimation
+    module 'swirl_jatmos.microphysics.microphysics_one_moment' has no attribute 'sublimation'
+
+======================================================================
